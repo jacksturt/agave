@@ -334,7 +334,12 @@ impl<'a> InvokeContext<'a> {
         // Note: This is an O(n^2) algorithm,
         // but performed on a very small slice and requires no heap allocations.
         let instruction_context = self.transaction_context.get_current_instruction_context()?;
+        // This variable will hold the deduplicated instruction accounts, with the highest level of privledges needed for the account.
+        // For example, if you had [{"alice", writable: false, signer: true}, {"bob", writable: false, signer: false}, {"alice", writable: true, signer: false}],
+        // the deduplicated_instruction_accounts would be [{"alice", writable: true, signer: true}, {"bob", writable: false, signer: false}].
         let mut deduplicated_instruction_accounts: Vec<InstructionAccount> = Vec::new();
+        // This variable will hold the indices of the duplicate accounts in the deduplicated_instruction_accounts vector.
+        // For example, if you had accounts with "keys" [A, B, C, A, C, B], the duplicate_indicies would be [0, 1, 2, 0, 2, 1].
         let mut duplicate_indicies = Vec::with_capacity(instruction.accounts.len());
         for (instruction_account_index, account_meta) in instruction.accounts.iter().enumerate() {
             let index_in_transaction = self
@@ -385,6 +390,8 @@ impl<'a> InvokeContext<'a> {
                 });
             }
         }
+
+        // Iterate through the accounts and make sure we are not elevating privileges illegally.
         for instruction_account in deduplicated_instruction_accounts.iter() {
             let borrowed_account = instruction_context.try_borrow_instruction_account(
                 self.transaction_context,
@@ -414,6 +421,9 @@ impl<'a> InvokeContext<'a> {
                 return Err(InstructionError::PrivilegeEscalation);
             }
         }
+
+        // Here, we reconstruct the list of accounts with duplicates, but with the highest level of privledges.
+        // If we run into an error, send it up the stack.
         let instruction_accounts = duplicate_indicies
             .into_iter()
             .map(|duplicate_index| {
@@ -439,6 +449,7 @@ impl<'a> InvokeContext<'a> {
             return Err(InstructionError::AccountNotExecutable);
         }
 
+        // Return the deduplicated instruction accounts and the program account index
         Ok((
             instruction_accounts,
             vec![borrowed_program_account.get_index_in_transaction()],
