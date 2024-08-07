@@ -244,6 +244,7 @@ impl<'a> InvokeContext<'a> {
 
     /// Push a stack frame onto the invocation stack
     pub fn push(&mut self) -> Result<(), InstructionError> {
+        // Get our current instruction context and program id
         let instruction_context = self
             .transaction_context
             .get_instruction_context_at_index_in_trace(
@@ -252,11 +253,13 @@ impl<'a> InvokeContext<'a> {
         let program_id = instruction_context
             .get_last_program_key(self.transaction_context)
             .map_err(|_| InstructionError::UnsupportedProgramId)?;
+
         if self
             .transaction_context
             .get_instruction_context_stack_height()
             != 0
         {
+            // Check if the current program id is in the stack
             let contains = (0..self
                 .transaction_context
                 .get_instruction_context_stack_height())
@@ -270,6 +273,7 @@ impl<'a> InvokeContext<'a> {
                         .map(|program_account| program_account.get_key() == program_id)
                         .unwrap_or(false)
                 });
+            // Check if the current program id is the last program id in the stack
             let is_last = self
                 .transaction_context
                 .get_current_instruction_context()
@@ -466,10 +470,13 @@ impl<'a> InvokeContext<'a> {
         timings: &mut ExecuteTimings,
     ) -> Result<(), InstructionError> {
         *compute_units_consumed = 0;
+        // Get the next instruction context and configure it with the data from prepare_instruction
         self.transaction_context
             .get_next_instruction_context()?
             .configure(program_indices, instruction_accounts, instruction_data);
+        // Push the new instruction context onto the stack
         self.push()?;
+        // Process the executable chain
         self.process_executable_chain(compute_units_consumed, timings)
             // MUST pop if and only if `push` succeeded, independent of `result`.
             // Thus, the `.and()` instead of an `.and_then()`.
