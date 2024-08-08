@@ -333,10 +333,14 @@ impl<'a> InvokeContext<'a> {
         instruction: &StableInstruction,
         signers: &[Pubkey],
     ) -> Result<(Vec<InstructionAccount>, Vec<IndexOfAccount>), InstructionError> {
+        // Potential improvements: This algorithm is currently O(n^2) and requires heap allocations.
+        // We can improve this by using a hashmap to deduplicate the accounts and then iterating through the instruction accounts again to assign the correct indices.
+        // We would still be using heap allocations, but we can likely drop to O(log n^2) or better.
         // Finds the index of each account in the instruction by its pubkey.
         // Then normalizes / unifies the privileges of duplicate accounts.
         // Note: This is an O(n^2) algorithm,
         // but performed on a very small slice and requires no heap allocations.
+        // ^ this is no longer true. Both deduplicated_instruction_accounts and duplicate_indicies are heap allocated.
         let instruction_context = self.transaction_context.get_current_instruction_context()?;
         // This variable will hold the deduplicated instruction accounts, with the highest level of privledges needed for the account.
         // For example, if you had [{"alice", writable: false, signer: true}, {"bob", writable: false, signer: false}, {"alice", writable: true, signer: false}],
