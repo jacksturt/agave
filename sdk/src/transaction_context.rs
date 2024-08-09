@@ -1,6 +1,8 @@
 //! Data shared between program runtime and built-in programs as well as SBF programs.
 #![deny(clippy::indexing_slicing)]
 
+use std::collections::HashMap;
+
 #[cfg(all(not(target_os = "solana"), feature = "full", debug_assertions))]
 use crate::signature::Signature;
 #[cfg(not(target_os = "solana"))]
@@ -538,6 +540,29 @@ impl InstructionContext {
                     == Some(pubkey)
             })
             .map(|index| index as IndexOfAccount)
+    }
+
+    /// Searches for an instruction account by its key
+    pub fn update_index_in_caller_for_hashmap(
+        &self,
+        transaction_context: &TransactionContext,
+        deduplicated_instruction_accounts: &mut HashMap<Pubkey, (InstructionAccount, Vec<usize>)>,
+    ) -> Option<()> {
+        for (index_in_caller, instruction_account) in self.instruction_accounts.iter().enumerate() {
+            if let Some(ix_account_key) = transaction_context
+                .account_keys
+                .get(instruction_account.index_in_transaction as usize)
+            {
+                if let Some((ix_account, _)) =
+                    deduplicated_instruction_accounts.get_mut(ix_account_key)
+                {
+                    ix_account.index_in_caller = index_in_caller as u16;
+                } else {
+                    return None;
+                }
+            }
+        }
+        Some(())
     }
 
     /// Translates the given instruction wide program_account_index into a transaction wide index

@@ -40,7 +40,9 @@ use {
     std::{
         alloc::Layout,
         cell::RefCell,
+        collections::HashMap,
         fmt::{self, Debug},
+        marker::Tuple,
         rc::Rc,
     },
 };
@@ -346,40 +348,27 @@ impl<'a> InvokeContext<'a> {
         // For example, if you had [{"alice", writable: false, signer: true}, {"bob", writable: false, signer: false}, {"alice", writable: true, signer: false}],
         // the deduplicated_instruction_accounts would be [{"alice", writable: true, signer: true}, {"bob", writable: false, signer: false}].
         let mut deduplicated_instruction_accounts: Vec<InstructionAccount> = Vec::new();
+        let mut deduplicated_instruction_accounts2: HashMap<
+            Pubkey,
+            (InstructionAccount, Vec<usize>),
+        > = HashMap::new();
         // This variable will hold the indices of the duplicate accounts in the deduplicated_instruction_accounts vector.
         // For example, if you had accounts with "keys" [A, B, C, A, C, B], the duplicate_indicies would be [0, 1, 2, 0, 2, 1].
         let mut duplicate_indicies = Vec::with_capacity(instruction.accounts.len());
         for (instruction_account_index, account_meta) in instruction.accounts.iter().enumerate() {
-            let index_in_transaction = self
-                .transaction_context
-                .find_index_of_account(&account_meta.pubkey)
-                .ok_or_else(|| {
-                    ic_msg!(
-                        self,
-                        "Instruction references an unknown account {}",
-                        account_meta.pubkey,
-                    );
-                    InstructionError::MissingAccount
-                })?;
-            if let Some(duplicate_index) =
-                deduplicated_instruction_accounts
-                    .iter()
-                    .position(|instruction_account| {
-                        instruction_account.index_in_transaction == index_in_transaction
-                    })
+            // Is this index ever different from instruction_account_index?
+
+            if let Some(duplicate_info) =
+                deduplicated_instruction_accounts2.get_mut(&account_meta.pubkey)
             {
-                duplicate_indicies.push(duplicate_index);
-                let instruction_account = deduplicated_instruction_accounts
-                    .get_mut(duplicate_index)
-                    .ok_or(InstructionError::NotEnoughAccountKeys)?;
+                let (instruction_account, dup_indices) = duplicate_info;
+                dup_indices.push(instruction_account_index);
                 instruction_account.is_signer |= account_meta.is_signer;
                 instruction_account.is_writable |= account_meta.is_writable;
             } else {
-                let index_in_caller = instruction_context
-                    .find_index_of_instruction_account(
-                        self.transaction_context,
-                        &account_meta.pubkey,
-                    )
+                let index_in_transaction = self
+                    .transaction_context
+                    .find_index_of_account(&account_meta.pubkey)
                     .ok_or_else(|| {
                         ic_msg!(
                             self,
@@ -390,14 +379,19 @@ impl<'a> InvokeContext<'a> {
                     })?;
                 duplicate_indicies.push(deduplicated_instruction_accounts.len());
                 deduplicated_instruction_accounts.push(InstructionAccount {
-                    index_in_transaction,
-                    index_in_caller,
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
                     index_in_callee: instruction_account_index as IndexOfAccount,
                     is_signer: account_meta.is_signer,
                     is_writable: account_meta.is_writable,
                 });
             }
         }
+
+        self.transaction_context.update_index_in_caller_for_hashmap(
+            self.transaction_context,
+            deduplicated_instruction_accounts,
+        );
 
         // Iterate through the accounts and make sure we are not elevating privileges illegally.
         for instruction_account in deduplicated_instruction_accounts.iter() {
