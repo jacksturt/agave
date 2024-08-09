@@ -377,24 +377,37 @@ impl<'a> InvokeContext<'a> {
                         );
                         InstructionError::MissingAccount
                     })?;
-                duplicate_indicies.push(deduplicated_instruction_accounts.len());
-                deduplicated_instruction_accounts.push(InstructionAccount {
-                    index_in_transaction: 0,
-                    index_in_caller: 0,
-                    index_in_callee: instruction_account_index as IndexOfAccount,
-                    is_signer: account_meta.is_signer,
-                    is_writable: account_meta.is_writable,
-                });
+                deduplicated_instruction_accounts2.insert(
+                    account_meta.pubkey,
+                    (
+                        InstructionAccount {
+                            index_in_transaction: 0,
+                            index_in_caller: 0,
+                            index_in_callee: instruction_account_index as IndexOfAccount,
+                            is_signer: account_meta.is_signer,
+                            is_writable: account_meta.is_writable,
+                        },
+                        vec![instruction_account_index],
+                    ),
+                );
             }
         }
 
-        self.transaction_context.update_index_in_caller_for_hashmap(
+        instruction_context.update_index_in_caller_for_hashmap(
             self.transaction_context,
-            deduplicated_instruction_accounts,
+            &mut deduplicated_instruction_accounts2,
         );
 
+        instruction_context.update_index_in_transaction_for_hashmap(
+            self.transaction_context,
+            &mut deduplicated_instruction_accounts2,
+        );
+
+        let instruction_accounts: Vec<InstructionAccount> =
+            Vec::with_capacity(instruction.accounts.len());
+
         // Iterate through the accounts and make sure we are not elevating privileges illegally.
-        for instruction_account in deduplicated_instruction_accounts.iter() {
+        for (_, (instruction_account, indices)) in deduplicated_instruction_accounts2.iter() {
             let borrowed_account = instruction_context.try_borrow_instruction_account(
                 self.transaction_context,
                 instruction_account.index_in_caller,
@@ -422,19 +435,10 @@ impl<'a> InvokeContext<'a> {
                 );
                 return Err(InstructionError::PrivilegeEscalation);
             }
+            for index in indices {
+                instruction_accounts[index] = instruction_account.clone();
+            }
         }
-
-        // Here, we reconstruct the list of accounts with duplicates, but with the highest level of privledges.
-        // If we run into an error, send it up the stack.
-        let instruction_accounts = duplicate_indicies
-            .into_iter()
-            .map(|duplicate_index| {
-                Ok(deduplicated_instruction_accounts
-                    .get(duplicate_index)
-                    .ok_or(InstructionError::NotEnoughAccountKeys)?
-                    .clone())
-            })
-            .collect::<Result<Vec<InstructionAccount>, InstructionError>>()?;
 
         // Find and validate executables / program accounts
         let callee_program_id = instruction.program_id;

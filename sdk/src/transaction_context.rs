@@ -542,7 +542,7 @@ impl InstructionContext {
             .map(|index| index as IndexOfAccount)
     }
 
-    /// Searches for an instruction account by its key
+    // Takes a hashmap of deduplicated instruction accounts and updates the index_in_caller field
     pub fn update_index_in_caller_for_hashmap(
         &self,
         transaction_context: &TransactionContext,
@@ -560,6 +560,24 @@ impl InstructionContext {
                 } else {
                     return None;
                 }
+            }
+        }
+        Some(())
+    }
+
+    // Takes a hashmap of deduplicated instruction accounts and updates the index_in_caller field
+    pub fn update_index_in_transaction_for_hashmap(
+        &self,
+        transaction_context: &TransactionContext,
+        deduplicated_instruction_accounts: &mut HashMap<Pubkey, (InstructionAccount, Vec<usize>)>,
+    ) -> Option<()> {
+        for (index_in_transaction, account_key) in
+            transaction_context.account_keys.iter().enumerate()
+        {
+            if let Some((instruction_account, _)) =
+                deduplicated_instruction_accounts.get_mut(account_key)
+            {
+                instruction_account.index_in_transaction = index_in_transaction as u16;
             }
         }
         Some(())
